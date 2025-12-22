@@ -1,0 +1,186 @@
+{
+  "name": "Create Module",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-module",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e283c0f4-0014-4c05-8fa0-a99cf7341891",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        48
+      ],
+      "webhookId": "create-module-webhook"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "modules",
+          "mode": "list",
+          "cachedResultName": "modules"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "title": "={{ $json.body.title }}",
+            "description": "={{ $json.body.description }}",
+            "teacher_id": "={{ $json.body.teacherId }}",
+            "teacher_name": "={{ $json.body.teacherName }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "teacher_id",
+              "displayName": "teacher_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "teacher_name",
+              "displayName": "teacher_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "104f0121-ad7f-44c5-91dd-c658cea5efe0",
+      "name": "Insert Module",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -240,
+        48
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "ntvZoh6PSWqp7bCl",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Module created successfully\",\n  \"moduleId\": \"{{ $json.id }}\",\n  \"title\": \"{{ $json.title }}\"\n}",
+        "options": {}
+      },
+      "id": "518c916f-4c78-4e2b-8d95-14300a1331b6",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"message\": \"Failed to create module. Please try again.\",\n  \"error\": \"{{ $json.error?.message || 'Database error' }}\"\n}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "6acbf703-e1b9-4024-8d58-1e4768e8d8d6",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        160
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Insert Module",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Module": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fd2d803b-9518-40dd-a918-dd78aa54b439",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d30e10418323ee3b0cace2b29535082b0ea784c195c4c424b33289493bff7863"
+  },
+  "id": "NGwkWC7qMuALhGvP",
+  "tags": [
+    {
+      "updatedAt": "2025-12-22T11:04:00.847Z",
+      "createdAt": "2025-12-22T11:04:00.847Z",
+      "id": "aMug7NNgyX2UPh15",
+      "name": "school-platform"
+    }
+  ]
+}

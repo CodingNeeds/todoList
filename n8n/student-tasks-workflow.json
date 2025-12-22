@@ -1,0 +1,300 @@
+{
+  "name": "Student Tasks API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-student-tasks",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-get-tasks",
+      "name": "Webhook - Get Tasks",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 300],
+      "webhookId": "get-student-tasks"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  t.id,\n  t.title,\n  t.description,\n  t.task_type as \"taskType\",\n  t.module_id as \"moduleId\",\n  m.title as \"moduleName\",\n  t.assigned_by as \"assignedBy\",\n  t.assigned_by_name as \"assignedByName\",\n  t.due_date as \"dueDate\",\n  t.resources,\n  st.status\nFROM tasks t\nJOIN modules m ON t.module_id = m.id\nJOIN student_tasks st ON t.id = st.task_id\nWHERE st.student_id = $1\n  AND ($2::uuid IS NULL OR t.module_id = $2::uuid)\n  AND ($3::varchar IS NULL OR st.status = $3)\n  AND ($4::timestamp IS NULL OR t.due_date >= $4::timestamp)\n  AND ($5::timestamp IS NULL OR t.due_date <= $5::timestamp)\nORDER BY t.due_date ASC",
+        "options": {
+          "queryParams": "={{ [$query.student_id || 's1', $query.module_id || null, $query.status || null, $query.date_from || null, $query.date_to || null] }}"
+        }
+      },
+      "id": "postgres-get-tasks",
+      "name": "PostgreSQL - Get Tasks",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-success-get",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to fetch tasks\", \"error\": \"{{ $json.error?.message || 'Unknown error' }}\" }",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error-get",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 380]
+    },
+    {
+      "parameters": {
+        "httpMethod": "PATCH",
+        "path": "update-task-status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-update-status",
+      "name": "Webhook - Update Status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 600],
+      "webhookId": "update-task-status"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE student_tasks \nSET \n  status = $1,\n  completed_at = CASE WHEN $1 = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END\nWHERE task_id = $2::uuid AND student_id = $3\nRETURNING *",
+        "options": {
+          "queryParams": "={{ [$json.body.status, $json.body.taskId, $json.body.studentId || 's1'] }}"
+        }
+      },
+      "id": "postgres-update-status",
+      "name": "PostgreSQL - Update Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 600],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Task status updated\" }",
+        "options": {}
+      },
+      "id": "respond-success-update",
+      "name": "Respond Update Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 560]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to update task status\" }",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error-update",
+      "name": "Respond Update Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 680]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-modules",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-get-modules",
+      "name": "Webhook - Get Modules",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 900],
+      "webhookId": "get-modules"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title FROM modules ORDER BY title ASC",
+        "options": {}
+      },
+      "id": "postgres-get-modules",
+      "name": "PostgreSQL - Get Modules",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 900],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-success-modules",
+      "name": "Respond Modules Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 860]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to fetch modules\" }",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error-modules",
+      "name": "Respond Modules Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [700, 960]
+    }
+  ],
+  "connections": {
+    "Webhook - Get Tasks": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Get Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Get Tasks": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Update Status": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Update Status": {
+      "main": [
+        [
+          {
+            "node": "Respond Update Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Update Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Get Modules": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Get Modules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Get Modules": {
+      "main": [
+        [
+          {
+            "node": "Respond Modules Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Modules Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 3,
+  "pinData": {}
+}
