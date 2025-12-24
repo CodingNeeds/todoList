@@ -1,0 +1,562 @@
+{
+  "name": "LLM Checkbox Generator for Tasks",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-checkboxes",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "webhook-generate",
+      "name": "Webhook - Generate Checkboxes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "generate-checkboxes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Get task details based on type\nSELECT \n  CASE \n    WHEN $2 = 'exam' THEN (SELECT title FROM exams WHERE id = $1::uuid)\n    ELSE (SELECT title FROM exercises WHERE id = $1::uuid)\n  END as task_title,\n  CASE \n    WHEN $2 = 'exam' THEN (SELECT description FROM exams WHERE id = $1::uuid)\n    ELSE (SELECT description FROM exercises WHERE id = $1::uuid)\n  END as task_description,\n  CASE \n    WHEN $2 = 'exam' THEN (SELECT m.title FROM exams e JOIN modules m ON e.module_id = m.id WHERE e.id = $1::uuid)\n    ELSE (SELECT m.title FROM exercises ex JOIN modules m ON ex.module_id = m.id WHERE ex.id = $1::uuid)\n  END as module_name",
+        "options": {
+          "queryParams": "={{ [$json.body.taskId, $json.body.taskType] }}"
+        }
+      },
+      "id": "postgres-get-task",
+      "name": "PostgreSQL - Get Task Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a helpful educational assistant. Generate a list of 5-8 actionable checklist items (subtasks) that a student should complete for the given assignment. Each item should be specific, measurable, and help the student organize their work.\n\nRespond ONLY with a valid JSON array of objects with this structure:\n[\n  {\"title\": \"Subtask description\", \"position\": 1},\n  {\"title\": \"Another subtask\", \"position\": 2}\n]\n\nDo not include any other text, markdown formatting, or code blocks."
+            },
+            {
+              "role": "user",
+              "content": "Generate checklist items for this assignment:\n\nModule: {{ $json.module_name }}\nTitle: {{ $json.task_title }}\nDescription: {{ $json.task_description }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "openai-generate",
+      "name": "OpenAI - Generate Checkboxes",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [680, 260],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM response and prepare for database insert\nconst input = $input.first();\nconst llmResponse = input.json.message?.content || input.json.text || '[]';\n\n// Get original request data from webhook\nconst webhookData = $('Webhook - Generate Checkboxes').first().json;\nconst taskId = webhookData.body?.taskId;\nconst taskType = webhookData.body?.taskType;\nconst studentId = webhookData.body?.studentId || '33333333-3333-3333-3333-333333333333';\n\ntry {\n  // Clean up potential markdown code blocks\n  let cleanJson = llmResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const checkboxes = JSON.parse(cleanJson);\n  \n  // Map to items for batch insert\n  return checkboxes.map((item, index) => ({\n    json: {\n      taskId,\n      taskType,\n      studentId,\n      title: item.title,\n      position: item.position || index + 1,\n      generatedBy: 'llm'\n    }\n  }));\n} catch (e) {\n  return [{\n    json: {\n      error: true,\n      message: 'Failed to parse LLM response: ' + e.message,\n      rawResponse: llmResponse\n    }\n  }];\n}"
+      },
+      "id": "code-parse",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 260]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO task_checkboxes (task_id, task_type, student_id, title, position, generated_by)\nVALUES ($1::uuid, $2, $3::uuid, $4, $5, $6)\nRETURNING id, task_id, task_type, student_id, title, is_completed, position, generated_by, created_at",
+        "options": {
+          "queryParams": "={{ [$json.taskId, $json.taskType, $json.studentId, $json.title, $json.position, $json.generatedBy] }}"
+        }
+      },
+      "id": "postgres-insert",
+      "name": "PostgreSQL - Insert Checkboxes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 260],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Checkboxes generated successfully\",\n  \"checkboxes\": {{ JSON.stringify($items().map(item => item.json)) }}\n}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1340, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to generate checkboxes\", \"error\": \"{{ $json.error?.message || $json.message || 'Unknown error' }}\" }",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1340, 380]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-checkboxes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-get-checkboxes",
+      "name": "Webhook - Get Checkboxes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 560],
+      "webhookId": "get-checkboxes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, task_id, task_type, student_id, title, is_completed, position, generated_by, created_at\nFROM task_checkboxes\nWHERE task_id = $1::uuid AND task_type = $2 AND student_id = $3::uuid\nORDER BY position ASC",
+        "options": {
+          "queryParams": "={{ [$json.query.taskId, $json.query.taskType, $json.query.studentId || '33333333-3333-3333-3333-333333333333'] }}"
+        }
+      },
+      "id": "postgres-get-checkboxes",
+      "name": "PostgreSQL - Get Checkboxes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 560],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($items().map(item => item.json)) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-get-success",
+      "name": "Respond Get Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 520]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to fetch checkboxes\" }",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-get-error",
+      "name": "Respond Get Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 620]
+    },
+    {
+      "parameters": {
+        "httpMethod": "PATCH",
+        "path": "toggle-checkbox",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-toggle",
+      "name": "Webhook - Toggle Checkbox",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 800],
+      "webhookId": "toggle-checkbox"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE task_checkboxes\nSET is_completed = $2, updated_at = NOW()\nWHERE id = $1::uuid\nRETURNING id, is_completed",
+        "options": {
+          "queryParams": "={{ [$json.body.checkboxId, $json.body.isCompleted] }}"
+        }
+      },
+      "id": "postgres-toggle",
+      "name": "PostgreSQL - Toggle Checkbox",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 800],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"checkbox\": {{ JSON.stringify($json) }} }",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-toggle-success",
+      "name": "Respond Toggle Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 760]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to toggle checkbox\" }",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-toggle-error",
+      "name": "Respond Toggle Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 860]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "add-manual-checkbox",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-add-manual",
+      "name": "Webhook - Add Manual Checkbox",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 1040],
+      "webhookId": "add-manual-checkbox"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO task_checkboxes (task_id, task_type, student_id, title, position, generated_by)\nVALUES (\n  $1::uuid, \n  $2, \n  $3::uuid, \n  $4, \n  COALESCE((SELECT MAX(position) + 1 FROM task_checkboxes WHERE task_id = $1::uuid AND task_type = $2 AND student_id = $3::uuid), 1),\n  'manual'\n)\nRETURNING id, task_id, task_type, student_id, title, is_completed, position, generated_by, created_at",
+        "options": {
+          "queryParams": "={{ [$json.body.taskId, $json.body.taskType, $json.body.studentId || '33333333-3333-3333-3333-333333333333', $json.body.title] }}"
+        }
+      },
+      "id": "postgres-add-manual",
+      "name": "PostgreSQL - Add Manual Checkbox",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 1040],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "PostgreSQL"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"checkbox\": {{ JSON.stringify($json) }} }",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-add-success",
+      "name": "Respond Add Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 1000]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Failed to add checkbox\" }",
+        "options": {
+          "responseCode": 500,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "respond-add-error",
+      "name": "Respond Add Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [680, 1100]
+    }
+  ],
+  "connections": {
+    "Webhook - Generate Checkboxes": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Get Task Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Get Task Details": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Generate Checkboxes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Generate Checkboxes": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Insert Checkboxes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Insert Checkboxes": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Get Checkboxes": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Get Checkboxes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Get Checkboxes": {
+      "main": [
+        [
+          {
+            "node": "Respond Get Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Get Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Toggle Checkbox": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Toggle Checkbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Toggle Checkbox": {
+      "main": [
+        [
+          {
+            "node": "Respond Toggle Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Toggle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Add Manual Checkbox": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Add Manual Checkbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Add Manual Checkbox": {
+      "main": [
+        [
+          {
+            "node": "Respond Add Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Add Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 4,
+  "pinData": {}
+}
